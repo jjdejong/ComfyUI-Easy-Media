@@ -290,19 +290,19 @@ def _load_basic_module():
     utils_module.image_tensor_data_uris = lambda values, **kwargs: []
     utils_module.video_data_uris = lambda values: []
     utils_module.video_frame_data_uris = lambda values, **kwargs: []
-    utils_module.LLAMACPP_MODEL = "llama.cpp (本地)"
-    utils_module.MINIMAX_MODEL = "h3-context-ir (海螺官方)"
+    utils_module.LLAMACPP_MODEL = "llama.cpp (local)"
+    utils_module.MINIMAX_MODEL = "h3-context-ir (MiniMax official)"
     utils_module.PROMPT_ENHANCER_MODELS = [
         utils_module.MINIMAX_MODEL,
-        "doubao (火山引擎)",
-        "glm (智谱)",
+        "doubao (Volcengine)",
+        "glm (Zhipu)",
         "doubao (RunningHub)",
         "glm (RunningHub)",
         utils_module.LLAMACPP_MODEL,
     ]
     utils_module.PROMPT_ENHANCER_MAX_TOKENS = {
-        "doubao (火山引擎)": (4096, 131072),
-        "glm (智谱)": (65536, 131072),
+        "doubao (Volcengine)": (4096, 131072),
+        "glm (Zhipu)": (65536, 131072),
         "doubao (RunningHub)": (4096, 131072),
         "glm (RunningHub)": (65536, 131072),
         utils_module.LLAMACPP_MODEL: (512, 768),
@@ -2630,6 +2630,7 @@ def test_multitrack_task_output_schema_and_task_media_selection():
         "SYSTEM_PROMPT", "USER_PROMPT", "TYPE", "LENGTH", "IMAGES", "AUDIO", "VIDEO",
         "IMAGE_INDEXES",
         "LOCKED_AUDIO",
+        "MEDIA_SIGNATURE",
     ]
 
     images = [torch.zeros(1, 2, 2, 3), torch.ones(1, 2, 2, 3), torch.full((1, 2, 2, 3), 2.0)]
@@ -2676,12 +2677,14 @@ def test_multitrack_task_output_schema_and_task_media_selection():
         selected_video,
         image_indexes,
         locked_audio,
+        media_signature,
     ) = result.values
     assert system_prompt == ""
     assert user_prompt == "make it move"
     assert task_type == "rv2v"
     assert length == 5
     assert locked_audio is None
+    assert media_signature == ""
     assert selected_images == [images[1], images[2]]
     assert selected_audio[0]["waveform"].flatten().tolist() == list(range(4, 12))
     assert selected_video == [video_track]
@@ -2771,7 +2774,7 @@ def test_multitrack_task_output_restores_project_runtime_media_cache():
     )
 
     assert second is first
-    assert tracks_info["_easy_media_cache_status"]["task_output"] == "命中恢复缓存"
+    assert tracks_info["_easy_media_cache_status"]["task_output"] == "restored from cache"
 
 
 def test_multitrack_task_output_uses_selected_user_prompt_variant():
