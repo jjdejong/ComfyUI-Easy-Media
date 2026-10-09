@@ -83,6 +83,7 @@ from ..utils.multitrack import (
     _trim_track_audio,
     _video_stream_source,
     multitrack_audio_lock_is_effective,
+    multitrack_context_handoff_roles,
     multitrack_runtime_cache,
 )
 from ..utils.video import extract_video_audio
@@ -3358,6 +3359,11 @@ class MultiTrackTaskOutput(io.ComfyNode):
 
         task_type = _multitrack_task_type(task, len(selected_images), has_video)
         prompt = _selected_multitrack_user_prompt(content)
+        continues_previous, continued_by_next = (
+            (False, False)
+            if output_full_timeline
+            else multitrack_context_handoff_roles(task_entries, task_entry_index)
+        )
         system_prompt, api_prompt, json_mode = build_prompt_request(
             task_type,
             prompt,
@@ -3370,6 +3376,9 @@ class MultiTrackTaskOutput(io.ComfyNode):
             ),
             video_format=info.get("format"),
             task_mode=content.get("task_mode", "default"),
+            continues_previous=continues_previous,
+            continued_by_next=continued_by_next,
+            frame_rate=frame_rate,
         )
         chat_system_prompt, chat_user_prompt = _build_chat_prompts(system_prompt, api_prompt, prompt)
         llm_prompt = build_llm_prompt(chat_system_prompt, chat_user_prompt, json_mode)

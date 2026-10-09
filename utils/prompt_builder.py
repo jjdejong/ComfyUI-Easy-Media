@@ -743,6 +743,33 @@ N/A
 
 </details>"""
 
+# Frames of the previous segment pinned at the start of a context segment. Keep in sync with
+# H3_CONTEXT_SOURCE_FRAMES in nodes/project.py (tests/test_prompt_builder.py checks this).
+H3_CONTEXT_LEAD_IN_FRAMES = 22
+
+MINIMAX_REF_CONTEXT_INCOMING = """## 8. Continuation From a Previous Segment
+
+This segment is generated as a direct continuation. The first {lead_in} seconds of the generation timeline are the pinned tail of the previous segment. They show how that segment actually ended, which can differ from how its own prompt asked it to end in framing, camera motion, and pose. You cannot see that tail, so never guess it and never state the previous prompt's intended ending as fact. Pinned frames are binding: a description that disagrees with them tends to be rendered as an addition to them rather than a replacement.
+
+These rules govern how you write. Never copy them or their wording into the output. Keep every action, line of dialogue, and ending the input requests; the rules only decide where they are placed.
+
+- **Open with a hold.** `[Shot 1]` holds the incoming state. State that the camera keeps its incoming direction and framing and that the subject keeps the incoming pose, action, and lighting. Do not open with a new composition, a new arrangement of people, a new location, or a different framing.
+- **Keep the hold alive.** Give the held shot small visible life, such as a breath, a weight shift, or an eyeline change, so it does not read as a freeze. The camera may hold still; the performer does not.
+- **Change only after the hold.** Place no cut, no dialogue, and no new key action before 00:02.000. A requested change of framing, arrangement, or location is written as an explicit cut after that point; a change of distance alone is a camera movement. When the video is too short for a cut after the hold, write a single shot that develops out of the hold.
+- **Start in motion.** Anything already moving, such as a gait, a gesture, a camera move, an object in flight, or a sound, starts mid-motion at its incoming speed. It is never already completed at the first frame and may finish later.
+- **Be self-contained.** The model sees no earlier prompt text. Define every `<Subject N>` fully and name the location and lighting. Do not use "the same", "as before", or "continuing from the previous clip" for identity or place. Only pose, action, and camera may refer to what is incoming.
+- **Keep reference roles.** Use `<Picture N>` only to define a subject, setting, or style, never as the first frame, a keyframe, or a composition anchor of `[Shot 1]`. Do not use `<Video N>` or the `video continuation` task type for this handoff, because the continuation is supplied outside the prompt. The task type remains `reference generation`, plus any audio task type that applies.
+- **Timestamps.** Write timestamps against the generation timeline, which starts {lead_in} seconds before the delivered clip."""
+
+MINIMAX_REF_CONTEXT_OUTGOING = """## 9. Continuation Into a Next Segment
+
+The next segment continues directly from this segment's final frames, so this segment must end in motion. As with the rules above, these govern how you write and never appear in the output.
+
+- **No resolution at the end.** Camera movement, subject action, and sound are still in progress through the final frame. Do not describe an arrival or a rest: avoid "finishes", "arrives", "reaches", "settles", "comes to rest", "centered", "slows", and fading music or ambience.
+- **No cut in the final second**, and no new shot starting there.
+- **Finish speech earlier.** Every line of dialogue ends before the final second. Do not start a line that would run past the end of the video.
+- **Frame the ending as a movement or a hold,** not as a composition the camera arrives at. If the input names a final pose or framing, write it as the position the action is passing through at the last frame."""
+
 import json
 import torch
 import logging
@@ -885,6 +912,28 @@ def _format_prompt_template(template: str, **values: object) -> str:
     return template
 
 
+def build_context_handoff_guide(
+    continues_previous: bool = False,
+    continued_by_next: bool = False,
+    frame_rate: float = 24.0,
+) -> str:
+    """Return the context-continuation rules for a reference-mode segment prompt.
+
+    The incoming rules apply when the segment starts from the previous segment's pinned tail,
+    the outgoing rules when the next segment will start from this one's ending. Returns an
+    empty string when neither applies.
+    """
+    lead_in = H3_CONTEXT_LEAD_IN_FRAMES / max(float(frame_rate), 1.0)
+    sections = []
+    if continues_previous:
+        sections.append(
+            _format_prompt_template(MINIMAX_REF_CONTEXT_INCOMING, lead_in=f"{lead_in:.2f}")
+        )
+    if continued_by_next:
+        sections.append(MINIMAX_REF_CONTEXT_OUTGOING)
+    return "\n\n".join(sections)
+
+
 def build_prompt_request(
     task_type: str,
     user_prompt: str,
@@ -896,8 +945,16 @@ def build_prompt_request(
     json_mode: bool = False,
     video_format: str | None = None,
     task_mode: str | None = None,
+    continues_previous: bool = False,
+    continued_by_next: bool = False,
+    frame_rate: float = 24.0,
 ) -> tuple[str, str, bool]:
-    """Return the official system/user prompt pair for an external API node."""
+    """Return the official system/user prompt pair for an external API node.
+
+    ``continues_previous`` / ``continued_by_next`` mark a context-mode segment chain. They only
+    extend the default MiniMax reference-mode system prompt; custom system prompts, base-mode
+    prompts and edit mode are returned unchanged.
+    """
     user_prompt = (user_prompt or "").strip()
     if video_format == "MiniMax":
         uses_base_prompt = (
@@ -906,7 +963,18 @@ def build_prompt_request(
             else task_type in {"t2v", "i2v", "l2v"}
         )
         default_system_prompt = MINIMAX_BASE_PROMPT if uses_base_prompt else MINIMAX_REF_PROMPT
-        return custom_system_prompt or default_system_prompt, user_prompt, False
+        if custom_system_prompt:
+            return custom_system_prompt, user_prompt, False
+        is_reference_generation = (
+            task_mode == "ref" if task_mode is not None else task_type == "r2v"
+        )
+        if not uses_base_prompt and is_reference_generation:
+            handoff_guide = build_context_handoff_guide(
+                continues_previous, continued_by_next, frame_rate
+            )
+            if handoff_guide:
+                return f"{default_system_prompt}\n\n{handoff_guide}", user_prompt, False
+        return default_system_prompt, user_prompt, False
     ref_count = (1 if image is not None else 0) + _media_count(images)
     video_count = min(max(int(video_frames), 1), max(_media_count(video), 1))
     image_num = ref_count

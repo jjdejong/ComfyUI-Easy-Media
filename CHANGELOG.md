@@ -2,6 +2,15 @@
 
 ---
 
+## [Unreleased]
+
+### ✨ New Features
+
+- **MultiTrack Task Output**: Reference-mode (Ref2VA) segments in a `context` chain now get context-handoff rules appended to the default MiniMax reference system prompt. Because the previous segment rarely ends exactly as prompted (model priors on framing and camera motion), the rules tell the rewriter to open on a hold of the incoming state, keep the hold alive, delay cuts and dialogue until after it, start moving things mid-motion, keep each prompt self-contained, avoid using pictures or `<Video N>` as the handoff anchor, and end in motion when another `context` segment follows. Custom system prompts, base-mode prompts, edit mode, and `context_drift` (including the legacy `context_swap`) are unchanged. See "Prompting Context Segments" in the README.
+- **Multitrack workflow skill**: Documented the same handoff rules for agents that write prompts for `context` segments.
+
+---
+
 ## [1.3.4] - 2026-09-30
 
 ### ✨ New Features
