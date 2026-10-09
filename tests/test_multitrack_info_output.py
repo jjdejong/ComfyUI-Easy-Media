@@ -4853,6 +4853,85 @@ def test_multitrack_task_output_uses_l2v_and_minimax_base_system_prompt():
     assert prompt_builder_stub.calls[-1][2]["task_mode"] == "l2v"
 
 
+def _minimax_reference_chain(*continuity_modes):
+    return {
+        "format": "MiniMax",
+        "frame_rate": 24,
+        "tracks": [{"type": "task", "segments": [
+            {
+                "start_frame": index * 120,
+                "end_frame": (index + 1) * 120,
+                "content": {
+                    "task_mode": "ref",
+                    "continuity_mode": mode,
+                    "user_prompt": f"segment {index}",
+                    "images": [],
+                },
+            }
+            for index, mode in enumerate(continuity_modes)
+        ]}],
+    }
+
+
+def test_multitrack_task_output_passes_context_handoff_roles_to_prompt_builder():
+    module = _load_basic_module()
+    prompt_builder_stub = sys.modules["easy_media.utils.prompt_builder"]
+    tracks_info = _minimax_reference_chain("context", "context", "shot", "context")
+
+    roles = []
+    for index in range(4):
+        module.MultiTrackTaskOutput.execute(
+            [tracks_info], [], [], [], [index], ["api"],
+        )
+        kwargs = prompt_builder_stub.calls[-1][2]
+        roles.append((kwargs["continues_previous"], kwargs["continued_by_next"]))
+        assert kwargs["frame_rate"] == 24.0
+
+    assert roles == [
+        (False, True),   # first segment has no predecessor to continue
+        (True, False),   # continues segment 0; the next one is a fresh shot
+        (False, True),   # a shot can still be continued by the next context segment
+        (True, False),
+    ]
+
+
+def test_multitrack_task_output_treats_swap_and_full_timeline_as_standalone():
+    module = _load_basic_module()
+    prompt_builder_stub = sys.modules["easy_media.utils.prompt_builder"]
+    swap_chain = _minimax_reference_chain("context_swap", "context_swap")
+
+    module.MultiTrackTaskOutput.execute(
+        [swap_chain], [], [], [], [1], ["api"],
+    )
+    swap_kwargs = prompt_builder_stub.calls[-1][2]
+
+    full_chain = _minimax_reference_chain("context", "context")
+    module.MultiTrackTaskOutput.execute(
+        [full_chain], [], [], [], [-1], ["api"],
+    )
+    full_kwargs = prompt_builder_stub.calls[-1][2]
+
+    assert (swap_kwargs["continues_previous"], swap_kwargs["continued_by_next"]) == (False, False)
+    assert (full_kwargs["continues_previous"], full_kwargs["continued_by_next"]) == (False, False)
+
+
+def test_multitrack_context_handoff_roles_accept_the_legacy_context_alias():
+    module = _load_basic_module()
+    multitrack = sys.modules["easy_media.utils.multitrack"]
+    entries = [
+        {"task": {"content": {"continuity_mode": "context_test"}}},
+        {"task": {"content": {"continuity_mode": "CONTEXT"}}},
+        {"task": {"content": "not a dict"}},
+    ]
+
+    assert module is not None
+    assert multitrack.multitrack_context_handoff_roles(entries, 0) == (False, True)
+    assert multitrack.multitrack_context_handoff_roles(entries, 1) == (True, False)
+    assert multitrack.multitrack_context_handoff_roles(entries, 2) == (False, False)
+    assert multitrack.multitrack_context_handoff_roles(entries, 5) == (False, False)
+    assert multitrack.multitrack_context_handoff_roles([], 0) == (False, False)
+
+
 def test_multitrack_prompt_enhancer_schema_exposes_requested_inputs_and_outputs():
     module = _load_basic_module()
 

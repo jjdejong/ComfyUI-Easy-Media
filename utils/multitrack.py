@@ -282,6 +282,39 @@ def multitrack_audio_lock_is_effective(
     )
 
 
+def _task_entry_uses_plain_context(entry: object) -> bool:
+    """Return whether a task entry's continuity mode is plain ``context``."""
+    task = entry.get("task") if isinstance(entry, dict) else None
+    content = task.get("content") if isinstance(task, dict) else None
+    if not isinstance(content, dict):
+        return False
+    # "context_test" is the legacy alias for "context"; context_swap is a video-driven edit
+    # flow whose prompts follow the editing rules instead.
+    return str(content.get("continuity_mode", "shot")).lower() in {"context", "context_test"}
+
+
+def multitrack_context_handoff_roles(
+    task_entries: list[dict],
+    entry_index: int,
+) -> tuple[bool, bool]:
+    """Return ``(continues_previous, continued_by_next)`` for one task entry.
+
+    A segment continues the previous one when it is not the first entry and uses plain
+    ``context`` continuity. It is continued by the next one when that entry uses plain
+    ``context``, whatever this segment's own mode is.
+    """
+    if not isinstance(task_entries, list) or not 0 <= entry_index < len(task_entries):
+        return False, False
+    continues_previous = entry_index > 0 and _task_entry_uses_plain_context(
+        task_entries[entry_index]
+    )
+    continued_by_next = (
+        entry_index + 1 < len(task_entries)
+        and _task_entry_uses_plain_context(task_entries[entry_index + 1])
+    )
+    return continues_previous, continued_by_next
+
+
 def _slot_index(slot_name: str | None) -> int:
     if not slot_name:
         return 0
